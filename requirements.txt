@@ -1,0 +1,7 @@
+Flask
+nltk
+os
+json
+ssl
+stanza
+pprint

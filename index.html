@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Speech to Text with Animation</title>
+    <link
+      rel="stylesheet"
+      href="/Users/aryantele/projects/text2sign_video_v2/style/style.css"
+    />
+  </head>
+
+  <body>
+    <div class="main_container">
+      <div id="animation_container">
+        <video id="wordAnimation" controls autoplay>
+          <source id="animationSource" src="" type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+      </div>
+
+      <div class="output-container">
+        <div class="words" contenteditable>
+          <p id="p"></p>
+        </div>
+        <!-- <button id="recordButton">Start Recording</button> -->
+        <div class="icons_div">
+          <img id="recordButton" src="./images/3.png" alt="" class="icon" />
+          <img src="./images/2.png" alt="" class="icon" />
+        </div>
+
+        <p id="modifiedText"></p>
+      </div>
+    </div>
+
+    <script>
+      let isRecording = false;
+      let transcribedText = "";
+      let finalWordsDict = {};
+
+      window.SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.interimResults = true;
+
+      const words = document.querySelector(".words");
+      const recordButton = document.getElementById("recordButton");
+      const p = document.getElementById("p");
+      const modifiedText = document.getElementById("modifiedText");
+      const wordAnimation = document.getElementById("wordAnimation");
+      const animationSource = document.getElementById("animationSource");
+
+      recognition.addEventListener("result", (e) => {
+        const transcript = Array.from(e.results)
+          .map((result) => result[0])
+          .map((result) => result.transcript)
+          .join("");
+
+        p.innerHTML = transcript;
+        transcribedText = transcript;
+        console.log(transcribedText);
+      });
+
+      recordButton.addEventListener("click", () => {
+        if (isRecording) {
+          recognition.stop();
+          recordButton.textContent = "Start Recording";
+          processText(transcribedText);
+          // Clear previous data
+          p.innerHTML = "";
+          transcribedText = "";
+          finalWordsDict = {}; // Reset the object
+          wordAnimation.pause(); // Stop the previous animation
+          animationSource.src = ""; // Clear the previous video source
+          wordAnimation.load(); // Reload the video element to apply the clear source
+          modifiedText.innerText = ""; // Clear the previous ISL text
+        } else {
+          recognition.start();
+          recordButton.textContent = "Stop Recording";
+        }
+        isRecording = !isRecording;
+      });
+
+      recognition.addEventListener("end", () => {
+        if (isRecording) {
+          recognition.start();
+        }
+      });
+
+      async function processText(text) {
+        try {
+          // Clear previous values
+          finalWordsDict = {};
+          transcribedText = "";
+
+          console.log("Sending data");
+          const response = await fetch("/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ text }),
+          });
+
+          if (!response.ok) {
+            throw new Error("Network response was not ok.");
+          }
+
+          const result = await response.json();
+          if (result.error) {
+            throw new Error(result.error);
+          }
+
+          finalWordsDict = result.modified_text;
+          modifiedText.innerText = `ISL: ${Object.values(finalWordsDict).join(
+            " "
+          )}`;
+          console.log(finalWordsDict);
+
+          // Start playing the animation for the words
+          playAnimations(Object.values(finalWordsDict));
+        } catch (error) {
+          modifiedText.innerText = `Error: ${error.message}`;
+        }
+      }
+
+      function playAnimations(words) {
+        console.log("Playing animation");
+        let index = 0;
+
+        function playNextWord() {
+          if (index < words.length) {
+            const word = words[index].toLowerCase();
+            const videoPath = `/static/${word}.mp4`;
+
+            animationSource.src = videoPath;
+            wordAnimation.load();
+            wordAnimation.play();
+
+            wordAnimation.onended = () => {
+              index++;
+              playNextWord();
+            };
+          } else {
+            // Clear the video source when all animations are played
+            animationSource.src = "";
+            wordAnimation.load();
+
+            // Optionally reload the page or reset state after animations
+            setTimeout(() => window.location.reload(), 100); // Delay reload to allow last video to end
+          }
+        }
+
+        playNextWord();
+      }
+    </script>
+  </body>
+</html>
