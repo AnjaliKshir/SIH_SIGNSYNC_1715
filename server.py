@@ -11,6 +11,12 @@ from nltk.tree import ParentedTree
 import stanza
 import pprint
 from nltk.tree import Tree
+from googletrans import Translator
+from langdetect import detect
+
+from pymongo import MongoClient
+import gridfs
+
 # new project
 
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -21,6 +27,8 @@ nltk.download('stopwords')
 
 app = Flask(__name__)
 CORS(app)
+
+translator = Translator()
 
 # Pipeline for stanza (calls spacy for tokenizer)
 stanza.download('en', model_dir='stanza_resources')
@@ -201,6 +209,7 @@ def convert_to_final():
         final_output_in_sent.append(final_output(words))
 
 def take_input(text):
+
     test_input = text.strip().replace("\n", "").replace("\t", "")
     test_input2 = ""
     if len(test_input) == 1:
@@ -229,22 +238,50 @@ def print_lists():
     print("---------------Final sentence with letters--------------")
     pprint.pprint(final_output_in_sent)
 
+
+
+
+
 @app.route('/', methods=['GET'])
 def index():
     clear_all()
     return render_template('index.html')
 
 @app.route('/', methods=['POST', 'GET'])
-def process_text():
+async def process_text():
     try:
+        clear_all()
+
         data = request.get_json()
         print(f"Received data: {data}")
-        text = data.get('text')
-        if not text:
+        user_text = data.get('text',"")
+
+        if not user_text:
             print("No text provided.")
             return jsonify({'error': 'No text provided'}), 400
-        print("Text before processing:", text)
-        take_input(text)
+        
+        print("Text before processing:", user_text)
+
+        try:
+            # Detect the language of the input text
+            detected_lang = detect(user_text)
+            print(f"Detected language: {detected_lang}")
+
+            if detected_lang != 'en':
+                translated_text = await translator.translate(user_text, src=detected_lang, dest='en')
+                # print(f"Translated Text: {translated_text.pronunciation}")  # Debugging
+                response = jsonify({"translated_text": translated_text.text})
+                print(response.get_json())
+                take_input(translated_text.text)
+
+            else:
+                translated_text = user_text
+                print("Input text is already in English.")
+                take_input(translated_text)
+
+        except Exception as e:
+            return jsonify({"error": f"Translation failed: {str(e)}"}), 500
+
         for words in final_output_in_sent:
             for i, word in enumerate(words, start=1):
                 final_words_dict[i] = word
