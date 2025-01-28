@@ -3,4 +3,8 @@
 /stanford-parser-full-2018-10-17.jar
 /static
 .vscode/
+.env
 
+# Default ignored files
+/shelf/
+/workspace.xml

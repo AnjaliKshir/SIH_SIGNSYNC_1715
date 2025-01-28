@@ -82,7 +82,7 @@
 
         <div class="icons_div">
           <img id="recordButton" src="static/images/3.png" alt="" class="icon"/>
-          <img src="static/images/2.png" alt="" class="icon" />
+          <img id="vdoRecBtn" src="static/images/2.png" alt="" class="icon" />
         </div>
 
         <p id="modifiedText"></p>
@@ -92,6 +92,7 @@
     
     <script>
       let isRecording = false;
+      let isRunning = false;
       let transcribedText = "";
       let finalWordsDict = {};
 
@@ -102,12 +103,40 @@
 
       const words = document.querySelector(".words");
       const recordButton = document.getElementById("recordButton");
+      const vdoRecBtn = document.getElementById("vdoRecBtn");
       const p = document.getElementById("p");
       const modifiedText = document.getElementById("modifiedText");
       const wordAnimation = document.getElementById("wordAnimation");
       const animationSource = document.getElementById("animationSource");
       const avatarImage = document.getElementById("avatarImage");
       const textInput = document.getElementById("textInput");
+
+      vdoRecBtn.addEventListener('click', async () => {
+        try{
+          if (isRunning) {
+            console.log("Stopping the video recording");
+            // isRunning = false;
+            // vdoRecBtn.src = "static/images/2.png";
+            // await stopRecording();
+            const response = await fetch('/stop', { method: 'POST' });
+            const result = await response.json();
+            console.log(result.status);
+          } 
+          else {
+            console.log("Starting the video recording");
+            // isRunning = true;
+            // vdoRecBtn.src = "static/images/4.png";
+            // await startRecording();
+            const response = await fetch('/start', { method: 'POST' });
+            const result = await response.json();
+            console.log(result.status);
+          }
+          isRunning = !isRunning;
+        } 
+        catch (error) {
+          console.error('Error:', error);
+        }
+      });
 
 
       recognition.addEventListener("result", (e) => {
@@ -204,7 +233,7 @@
         function playNextWord() {
           if (index < words.length) {
             const word = words[index].toLowerCase();
-            const videoPath = `/static/${word}.mp4`;
+            const videoPath = `static/${word}.mp4`;
 
             animationSource.src = videoPath;
             wordAnimation.style.display = "block"; // Show the video

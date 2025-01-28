@@ -16,6 +16,21 @@ from langdetect import detect
 
 from pymongo import MongoClient
 import gridfs
+# from gridfs import GridFS
+from io import BytesIO
+from dotenv import load_dotenv
+
+import time
+
+import cv2
+from cvzone.HandTrackingModule import HandDetector
+from cvzone.ClassificationModule import Classifier
+import numpy as np
+import math
+import threading
+
+# Load environment variables from the .env file
+load_dotenv()
 
 # new project
 
@@ -25,10 +40,23 @@ ssl._create_default_https_context = ssl._create_unverified_context
 nltk.download('punkt')
 nltk.download('stopwords')
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
 translator = Translator()
+
+# Get MongoDB URL from environment variables
+mongo_url = os.getenv("MONGO_URL")
+if not mongo_url:
+    raise Exception("MONGO_URL not found in .env file")
+
+# MongoDB connection
+client = MongoClient(mongo_url)
+db = client["ISL_vdoDB"]
+collection = db["videos"]
+fs = gridfs.GridFS(db)
+
 
 # Pipeline for stanza (calls spacy for tokenizer)
 stanza.download('en', model_dir='stanza_resources')
@@ -238,7 +266,17 @@ def print_lists():
     print("---------------Final sentence with letters--------------")
     pprint.pprint(final_output_in_sent)
 
+def cleanup_temp_videos():
+    temp_dir = "temp_videos"
+    current_time = time.time()
 
+    for file in os.listdir(temp_dir):
+        file_path = os.path.join(temp_dir, file)
+        if os.path.isfile(file_path):
+            file_age = current_time - os.path.getctime(file_path)
+            if file_age > 86400:  # 24 hours in seconds
+                os.remove(file_path)
+                print(f"Deleted old temp video: {file_path}")
 
 
 
@@ -289,6 +327,24 @@ async def process_text():
         animations = {}
         for key, word in final_words_dict.items():
             word = word.lower()
+            
+            # # Fetch the video from MongoDB
+            # file = fs.find_one({"word": word})
+            # if file:
+            #     # Save the video temporarily to serve it
+            #     temp_video_path = os.path.join('static','temp_videos', f'{word}.mp4')
+                
+            #     # Ensure the temporary directory exists
+            #     os.makedirs('static','temp_videos', exist_ok=True)
+                
+            #     with open(temp_video_path, 'wb') as temp_video_file:
+            #         temp_video_file.write(file.read())
+
+            #     # animations[key] = temp_video_path  # Store the path to serve or use later
+            #     animations[key] = word
+            # else:
+            #     print(f"No video found for the word: {word}")
+
             animation_path = os.path.join('static/', f'{word}.mp4')
             if os.path.exists(animation_path):
                 animations[key] = word
@@ -296,6 +352,84 @@ async def process_text():
     except Exception as e:
         print(f"Exception occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+# logic for gesture recognition
+
+is_running = False
+thread = None
+
+# Global variables for OpenCV
+cap = None
+detector = HandDetector(maxHands=1)
+classifier = Classifier("Model/keras_model.h5", "Model/labels.txt")
+offset = 20
+imgSize = 300
+labels = ["Bye", "Good", "Hello", "No", "Okay", "ThankYou", "Yes"]
+
+def run_hand_detection():
+    global cap, is_running
+    cap = cv2.VideoCapture(0)
+    while is_running:
+        success, img = cap.read()
+        imgOutput = img.copy()
+        hands, img = detector.findHands(img)
+        if hands:
+            hand = hands[0]
+            x, y, w, h = hand['bbox']
+            imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
+            imgCrop = img[y - offset:y + h + offset, x - offset:x + w + offset]
+            aspectRatio = h / w
+
+            if aspectRatio > 1:
+                k = imgSize / h
+                wCal = math.ceil(k * w)
+                imgResize = cv2.resize(imgCrop, (wCal, imgSize))
+                wGap = math.ceil((imgSize - wCal) / 2)
+                imgWhite[:, wGap: wCal + wGap] = imgResize
+                prediction, index = classifier.getPrediction(imgWhite, draw=False)
+                print(prediction, index)
+            else:
+                k = imgSize / w
+                hCal = math.ceil(k * h)
+                imgResize = cv2.resize(imgCrop, (imgSize, hCal))
+                hGap = math.ceil((imgSize - hCal) / 2)
+                imgWhite[hGap: hCal + hGap, :] = imgResize
+                prediction, index = classifier.getPrediction(imgWhite, draw=False)
+            
+            cv2.rectangle(imgOutput, (x - offset, y - offset - 70), 
+                          (x - offset + 400, y - offset + 60 - 50), 
+                          (0, 255, 0), cv2.FILLED)
+            cv2.putText(imgOutput, labels[index], (x, y - 30), 
+                        cv2.FONT_HERSHEY_COMPLEX, 2, (0, 0, 0), 2)
+            cv2.rectangle(imgOutput, (x - offset, y - offset), 
+                          (x + w + offset, y + h + offset), (0, 255, 0), 4)
+        
+        cv2.imshow('Image', imgOutput)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+@app.route('/start', methods=['POST'])
+def start_script():
+    global is_running, thread
+    if not is_running:
+        is_running = True
+        thread = threading.Thread(target=run_hand_detection)
+        thread.start()
+        return jsonify({"status": "Started"})
+    return jsonify({"status": "Already running"})
+
+@app.route('/stop', methods=['POST'])
+def stop_script():
+    global is_running
+    if is_running:
+        is_running = False
+        return jsonify({"status": "Stopped"})
+    return jsonify({"status": "Not running"})
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
