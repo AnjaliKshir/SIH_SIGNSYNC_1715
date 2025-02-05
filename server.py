@@ -280,6 +280,7 @@ def cleanup_temp_videos():
 
 
 
+
 @app.route('/', methods=['GET'])
 def index():
     clear_all()
