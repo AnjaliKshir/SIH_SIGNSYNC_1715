@@ -1,8 +1,6 @@
 Flask
 nltk
-ssl
 stanza
-pprint
 spacy
 flask_cors
 google-cloud-speech
