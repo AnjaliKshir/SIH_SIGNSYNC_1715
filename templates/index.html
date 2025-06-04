@@ -96,10 +96,15 @@
       let transcribedText = "";
       let finalWordsDict = {};
 
-      window.SpeechRecognition =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.interimResults = true;
+      //new
+      let mediaRecorder;
+      let audioChunks = [];
+      let stream;
+
+      // window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      // const recognition = new SpeechRecognition();
+      // recognition.interimResults = true;
+      // recognition.continuous = true;
 
       const words = document.querySelector(".words");
       const recordButton = document.getElementById("recordButton");
@@ -111,6 +116,128 @@
       const avatarImage = document.getElementById("avatarImage");
       const textInput = document.getElementById("textInput");
 
+
+    recordButton.addEventListener("click", async () => {
+  console.log("🎙️ Record button clicked");
+
+  if (isRecording) {
+    recordButton.src = "static/images/3.png";
+    recordButton.textContent = "Start Recording";
+    // recognition.stop();
+    await stopRecording();
+    isRecording = false;
+  } else {
+    recordButton.src = "static/images/stop.png"; 
+    recordButton.textContent = "Stop Recording";
+    // recognition.start();
+    await startRecording();
+    isRecording = true;
+  }
+});
+// recognition.addEventListener("result", (event) => {
+//   // Collect the transcript so far, including interim results
+//   console.log("Inside recognition");
+//   let interimTranscript = "";
+//   let finalTranscript = "";
+
+//   for (let i = event.resultIndex; i < event.results.length; i++) {
+//     if (event.results[i].isFinal) {
+//       finalTranscript += event.results[i][0].transcript;
+//     } else {
+//       interimTranscript += event.results[i][0].transcript;
+//     }
+//   }
+//   // Show interim results live
+//   textInput.value = finalTranscript + interimTranscript;
+// });
+// recognition.addEventListener("end", () => {
+//   if (isRecording) {
+//     recognition.start(); // keep recognition alive while recording
+//   }
+// });
+
+      async function startRecording() {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = event => {
+            console.log("🎙️ Audio chunk captured:", event.data);
+            audioChunks.push(event.data);
+          };
+          
+          mediaRecorder.onstop = async () => {
+            console.log("🛑 Recording stopped...");
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+
+            //new
+            const audioURL = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioURL);
+            //audio.play(); // 🔊 This will play back your voice!
+
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'speech.webm');
+
+            try {
+              const response = await fetch('/speech-to-text', {
+                method: 'POST',
+                body: formData
+              });
+              const result = await response.json();
+              const text = result.transcript;
+              console.log("Transcript:", text);
+
+              p.innerHTML = text;
+              processText(text); // Use same processText function to trigger ISL conversion
+            } catch (error) {
+              console.error("Error processing speech:", error);
+            }
+          };
+
+          mediaRecorder.start();
+          console.log("Recording started...");
+        } catch (error) {
+          console.error("Error starting recording:", error);
+        }
+      }
+
+      function stopRecording() {
+        return new Promise((resolve) => {
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            console.log("Stopping mediaRecorder...");
+            mediaRecorder.stop();
+            
+            // Give time for onstop event to execute
+            setTimeout(() => {
+              if (stream) {
+                console.log("Stopping all audio tracks...");
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+              }
+              resolve();
+            }, 300);
+          } else {
+            console.log("MediaRecorder was not recording");
+            if (stream) {
+              console.log("Stopping all audio tracks anyway...");
+              stream.getTracks().forEach(track => track.stop());
+              stream = null;
+            }
+            resolve();
+          }
+        });
+      
+        // if (mediaRecorder && mediaRecorder.state === "recording") {
+        //   stream.getTracks().forEach(track => track.stop());
+        //   stream = null;
+        //   mediaRecorder.stop();
+        // }
+        // mediaRecorder.stop();
+        // console.log("Recording stopped.");
+      }
+      
       vdoRecBtn.addEventListener('click', async () => {
         try{
           if (isRunning) {
@@ -139,49 +266,51 @@
       });
 
 
-      recognition.addEventListener("result", (e) => {
-        const transcript = Array.from(e.results)
-          .map((result) => result[0])
-          .map((result) => result.transcript)
-          .join("");
+      // recognition.addEventListener("result", (e) => {
+      //   const transcript = Array.from(e.results)
+      //     .map((result) => result[0])
+      //     .map((result) => result.transcript)
+      //     .join("");
 
-        p.innerHTML = transcript;
-        transcribedText = transcript;
-        console.log(transcribedText);
-      });
+      //   p.innerHTML = transcript;
+      //   transcribedText = transcript;
+      //   console.log(transcribedText);
+      // });
 
-      recordButton.addEventListener("click", () => {
-        if (isRecording) {
-          recognition.stop();
-          recordButton.textContent = "Start Recording";
-          processText(transcribedText);
-          // Clear previous data
-          //p.innerHTML = "";
-          transcribedText = "";
-          finalWordsDict = {}; // Reset the object
-          wordAnimation.pause(); // Stop the previous animation
-          animationSource.src = ""; // Clear the previous video source
-          wordAnimation.style.display = "none"; // Hide the video
-          avatarImage.style.display = "block"; // Show the avatar
-          wordAnimation.load(); // Reload the video element to apply the clear source
-          modifiedText.innerText = ""; // Clear the previous ISL text
-        } else {
-          recognition.start();
-          recordButton.textContent = "Stop Recording";
-        }
-        isRecording = !isRecording;
-      });
+      // recordButton.addEventListener("click", () => {
+      //   console.log("btn clicked!!");
+      //   if (isRecording) {
+      //     recognition.stop();
+      //     recordButton.textContent = "Start Recording";
+      //     processText(transcribedText);
+      //     // Clear previous data
+      //     //p.innerHTML = "";
+      //     transcribedText = "";
+      //     finalWordsDict = {}; // Reset the object
+      //     wordAnimation.pause(); // Stop the previous animation
+      //     animationSource.src = ""; // Clear the previous video source
+      //     wordAnimation.style.display = "none"; // Hide the video
+      //     avatarImage.style.display = "block"; // Show the avatar
+      //     wordAnimation.load(); // Reload the video element to apply the clear source
+      //     modifiedText.innerText = ""; // Clear the previous ISL text
+      //   } else {
+      //     recognition.start();
+      //     recordButton.textContent = "Stop Recording";
+      //   }
+      //   isRecording = !isRecording;
+      // });
 
-      recognition.addEventListener("end", () => {
-        if (isRecording) {
-          recognition.start();
-        }
-      });
+      // recognition.addEventListener("end", () => {
+      //   if (isRecording) {
+      //     recognition.start();
+      //   }
+      // });
 
       textInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
           const text = textInput.value.trim();
+          console.log(text);
           if (text) {
             processText(text);
             textInput.value = ""; // Clear the input box

@@ -7,3 +7,6 @@ stanza
 pprint
 spacy
 flask_cors
+google-cloud-speech
+google-cloud-translate
+langdetect

@@ -29,6 +29,17 @@ import numpy as np
 import math
 import threading
 
+import io
+from google.cloud import speech
+from google.cloud import translate_v2 as translate
+
+# Set your GCP credentials path
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\anjuk\Desktop\BE_PROJECT\SIH_SIGNSYNC_1715\cogent-case-460012-s9-9ea78606f876.json"
+
+# Init Google APIs
+speech_client = speech.SpeechClient()
+translate_client = translate.Client()
+
 # Load environment variables from the .env file
 load_dotenv()
 
@@ -63,7 +74,7 @@ stanza.download('en', model_dir='stanza_resources')
 en_nlp = stanza.Pipeline('en', processors={'tokenize': 'spacy'})
 
 # Stop words that are not to be included in ISL
-stop_words = set(["am", "are", "is", "was", "were", "be", "being", "been", "have", "has", "had",
+stop_words = set(["a", "am", "are", "is", "was", "were", "be", "being", "been", "have", "has", "had",
                   "does", "did", "could", "should", "would", "can", "shall", "will", "may", "might", "must", "let", "do", 'to'])
 
 # Global variables for processing
@@ -170,48 +181,147 @@ def modify_tree_structure(parent_tree):
 
     tree_traversal_flag = label_parse_subtrees(parent_tree)
     modified_parse_tree = Tree('ROOT', [])
+
+    # First, add all words in their original order
+    original_words = parent_tree.leaves()
     i = 0
-    for sub_tree in parent_tree.subtrees():
-        if sub_tree is None:
-            print("Sub-tree is None.")
-            continue
-        print("Sub-tree:", sub_tree)
-        if sub_tree.label() == "NP":
-            i, modified_parse_tree = handle_noun_clause(i, tree_traversal_flag, modified_parse_tree, sub_tree)
-        elif sub_tree.label() in ["VP", "PRP"]:
-            i, modified_parse_tree = handle_verb_prop_clause(i, tree_traversal_flag, modified_parse_tree, sub_tree)
-
-    for sub_tree in parent_tree.subtrees():
-        for child_sub_tree in sub_tree.subtrees():
-            if child_sub_tree is None:
-                print("Child sub-tree is None.")
-                continue
-            if len(child_sub_tree.leaves()) == 1:
-                if tree_traversal_flag.get(child_sub_tree.treeposition(), 0) == 0 and \
-                   tree_traversal_flag.get(child_sub_tree.parent().treeposition(), 0) == 0:
-                    tree_traversal_flag[child_sub_tree.treeposition()] = 1
-                    modified_parse_tree.insert(i, child_sub_tree)
-                    i += 1
-
+    for word in original_words:
+        leaf_tree = None
+        # Find the subtree that contains just this word
+        for sub_tree in parent_tree.subtrees():
+            if len(sub_tree.leaves()) == 1 and sub_tree.leaves()[0] == word:
+                leaf_tree = sub_tree
+                break
+        
+        if leaf_tree:
+            tree_traversal_flag[leaf_tree.treeposition()] = 1
+            modified_parse_tree.insert(i, leaf_tree)
+        else:
+            # If we can't find the subtree, just add the word directly
+            word_tree = Tree('WORD', [word])
+            modified_parse_tree.insert(i, word_tree)
+        i += 1
+    
     return modified_parse_tree
+
+    # i = 0
+    # for sub_tree in parent_tree.subtrees():
+    #     if sub_tree is None:
+    #         print("Sub-tree is None.")
+    #         continue
+    #     print("Sub-tree:", sub_tree)
+    #     if sub_tree.label() == "NP":
+    #         i, modified_parse_tree = handle_noun_clause(i, tree_traversal_flag, modified_parse_tree, sub_tree)
+    #     elif sub_tree.label() in ["VP", "PRP"]:
+    #         i, modified_parse_tree = handle_verb_prop_clause(i, tree_traversal_flag, modified_parse_tree, sub_tree)
+
+    # for sub_tree in parent_tree.subtrees():
+    #     for child_sub_tree in sub_tree.subtrees():
+    #         if child_sub_tree is None:
+    #             print("Child sub-tree is None.")
+    #             continue
+    #         if len(child_sub_tree.leaves()) == 1:
+    #             if tree_traversal_flag.get(child_sub_tree.treeposition(), 0) == 0 and \
+    #                tree_traversal_flag.get(child_sub_tree.parent().treeposition(), 0) == 0:
+    #                 tree_traversal_flag[child_sub_tree.treeposition()] = 1
+    #                 modified_parse_tree.insert(i, child_sub_tree)
+    #                 i += 1
+
+    # return modified_parse_tree
 
 
 
 def reorder_eng_to_isl(input_string):
-    parser = CoreNLPParser(url='http://localhost:9000')  # Ensure CoreNLP server is running
-    try:
-        parse_tree = next(parser.raw_parse(input_string))
-        if parse_tree is None:
-            print("Parse tree is None.")
-            return input_string.split()  # Return words as they are if parsing fails
-        parent_tree = ParentedTree.convert(parse_tree)
-        modified_parse_tree = modify_tree_structure(parent_tree)
-        parsed_sent = modified_parse_tree.leaves()
-        return parsed_sent
-    except Exception as e:
-        print(f"Error parsing input string: {str(e)}")
-        return input_string.split()
+    # For ISL, we generally want subject-object-verb pattern
+    # Try to parse with CoreNLP first
+    # parser = CoreNLPParser(url='http://localhost:9000')  # Ensure CoreNLP server is running
 
+    # NEW: Special handling for greetings and simple phrases
+    simple_phrases = ["hello", "hi", "bye", "yes", "no", "ok", "okay", "thank you", "thanks", "good"]
+    words = input_string.split()
+    if not words:
+        return words
+    
+    # NEW: Check if this is just a greeting or simple phrase
+    # List of common greetings or introductory phrases
+    greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", 
+                "goodbye", "bye", "welcome", "greetings", "namaste"]
+    
+    # Check if the sentence starts with a greeting
+    first_word_lower = words[0].lower()
+    greeting_words = []
+    remaining_words = words.copy()
+    
+    # Identify greeting word(s) at the beginning
+    if first_word_lower in greetings:
+        greeting_words = [words[0]]
+        remaining_words = words[1:]
+    elif len(words) >= 2 and " ".join(words[:2]).lower() in greetings:
+        greeting_words = words[:2]
+        remaining_words = words[2:]
+    
+    # If there are remaining words, apply subject-object-verb pattern
+    if remaining_words:
+        try:
+            parser = CoreNLPParser(url='http://localhost:9000')
+            # parse_tree = next(parser.raw_parse(input_string))
+            parse_tree = next(parser.raw_parse(" ".join(remaining_words)))
+            if parse_tree is None:
+                print("Parse tree is None.")
+                # return input_string.split()  # Return words as they are if parsing fails
+                return greeting_words + apply_simple_sov(remaining_words)
+            
+            parent_tree = ParentedTree.convert(parse_tree)
+            modified_parse_tree = modify_tree_structure(parent_tree)
+            parsed_sent = modified_parse_tree.leaves()
+            # return parsed_sent
+            return greeting_words + parsed_sent
+        
+        except Exception as e:
+            print(f"Error parsing input string: {str(e)}")
+            # If parsing fails, just return the original words
+            # return input_string.split()
+            return greeting_words + apply_simple_sov(remaining_words)
+    else:
+        return greeting_words
+
+#New funciton
+def apply_simple_sov(words):
+    """Apply a simple Subject-Object-Verb reordering for ISL."""
+    # Remove auxiliary verbs which aren't needed in ISL
+    aux_verbs = ["is", "are", "am", "was", "were", "do", "does", "did", 
+                "has", "have", "had", "will", "shall", "should", "would", 
+                "can", "could", "may", "might", "must"]
+    
+    filtered_words = [w for w in words if w.lower() not in aux_verbs]
+    
+    if not filtered_words:
+        return words
+    
+    # For questions (ending with '?')
+    if words[-1].endswith('?') or words[0].lower() in ["what", "who", "where", "when", "why", "how"]:
+        # For questions like "What is your name?" -> "your name what"
+        question_words = ["what", "who", "where", "when", "why", "how"]
+        
+        # Remove question mark for processing
+        if filtered_words[-1].endswith('?'):
+            filtered_words[-1] = filtered_words[-1][:-1]
+        # Check if first word is a question word
+        if filtered_words and filtered_words[0].lower() in question_words:
+            question_word = filtered_words[0]
+            remainder = filtered_words[1:]
+            return remainder + [question_word]
+    # For simple declarative sentences, try basic SOV ordering
+    # This is very simplified and might not work for complex sentences
+    if len(filtered_words) >= 3:
+        # Identify potential subject, object, verb
+        subject = filtered_words[:1]  # First word as subject
+        verb = filtered_words[-1:]    # Last word as verb
+        object_words = filtered_words[1:-1]  # Everything in between as object
+        return subject + object_words + verb
+    
+    # If we can't properly reorder, return as is
+    return filtered_words
 
 def pre_process(text):
     remove_punct(word_list)
@@ -237,15 +347,28 @@ def convert_to_final():
         final_output_in_sent.append(final_output(words))
 
 def take_input(text):
-
+    # Clean the input text
     test_input = text.strip().replace("\n", "").replace("\t", "")
-    test_input2 = ""
-    if len(test_input) == 1:
-        test_input2 = test_input
-    else:
-        for word in test_input.split("."):
-            test_input2 += word.capitalize() + " ."
-    some_text = en_nlp(test_input2)
+
+    # # Better sentence handling
+    # test_input2 = ""
+    # if len(test_input) == 1:
+    #     test_input2 = test_input
+    # else:
+    #     # Split by sentence-ending punctuation but keep the punctuation
+    #     import re
+    #     sentences = re.split('([.!?])', test_input)
+    #     test_input2 = ""
+    #     for i in range(0, len(sentences)-1, 2):
+    #         if sentences[i].strip():  # Skip empty strings
+    #             test_input2 += sentences[i].strip().capitalize() + sentences[i+1] + " "
+    # # else:
+    # #     for word in test_input.split("."):
+    # #         test_input2 += word.capitalize() + " ."
+    
+    # some_text = en_nlp(test_input2)
+
+    some_text = en_nlp(test_input)
     convert(some_text)
 
 def convert(some_text):
@@ -302,28 +425,36 @@ async def process_text():
         print("Text before processing:", user_text)
 
         try:
-            # Detect the language of the input text
-            detected_lang = detect(user_text)
+            # Detect language using Google Translate
+            detection = translate_client.detect_language(user_text)
+            detected_lang = detection['language']
             print(f"Detected language: {detected_lang}")
 
             if detected_lang != 'en':
-                translated_text = await translator.translate(user_text, src=detected_lang, dest='en')
-                # print(f"Translated Text: {translated_text.pronunciation}")  # Debugging
-                response = jsonify({"translated_text": translated_text.text})
-                print(response.get_json())
-                take_input(translated_text.text)
-
+                translation = translate_client.translate(user_text, target_language='en')
+                translated_text = translation['translatedText']
+                print(f"Translated Text: {translated_text}")
+                take_input(translated_text)
             else:
                 translated_text = user_text
                 print("Input text is already in English.")
                 take_input(translated_text)
 
+
         except Exception as e:
             return jsonify({"error": f"Translation failed: {str(e)}"}), 500
 
+        # for words in final_output_in_sent:
+        #     for i, word in enumerate(words, start=1):
+        #         final_words_dict[i] = sword
+
+        index = 1  # Global counter
         for words in final_output_in_sent:
-            for i, word in enumerate(words, start=1):
-                final_words_dict[i] = word
+            for word in words:
+                final_words_dict[index] = word
+                index += 1  # Increment for each word across all sentences
+
+
         print("Final words dict:", final_words_dict)
         animations = {}
         for key, word in final_words_dict.items():
@@ -431,7 +562,38 @@ def stop_script():
         return jsonify({"status": "Stopped"})
     return jsonify({"status": "Not running"})
 
+@app.route("/speech-to-text", methods=["POST"])
+def speech_to_text():
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file uploaded"}), 400
+
+    audio_file = request.files["audio"]
+    audio_content = audio_file.read()
+
+    # Convert audio for Google Speech-to-Text
+    audio = speech.RecognitionAudio(content=audio_content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+        sample_rate_hertz=48000,  # or 16000 based on how you capture
+        language_code="hi-IN",  # can be auto-detected, but start with Hindi as example
+        alternative_language_codes=["en-US"],  # Also try English fallback
+        # enable_automatic_punctuation=True
+    )
+
+    response = speech_client.recognize(config=config, audio=audio)
+
+    if not response.results:
+        return jsonify({"transcript": "", "error": "No speech recognized"}), 200
+
+    transcript = response.results[0].alternatives[0].transcript
+    print("Transcript:", transcript)
+
+    # Detect & translate if not in English
+    translation = translate_client.translate(transcript, target_language="en")
+    translated_text = translation["translatedText"]
+    print("Translated:", translated_text)
+
+    return jsonify({"transcript": translated_text})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
-

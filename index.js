@@ -5,6 +5,7 @@ const transcription = document.getElementById("transcription");
 let mediaRecorder;
 let audioChunks = [];
 
+
 if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
   transcription.innerText = "Speech recognition not supported in this browser.";
   recordButton.disabled = true;
