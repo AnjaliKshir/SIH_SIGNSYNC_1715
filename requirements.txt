@@ -2,6 +2,8 @@ Flask
 nltk
 stanza
 spacy
+tensorflow
+pymongo
 flask_cors
 google-cloud-speech
 google-cloud-translate
