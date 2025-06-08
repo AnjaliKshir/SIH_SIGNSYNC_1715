@@ -30,36 +30,104 @@
       }
 
       .output-container {
-        height: 100%;
+        width: 100%;
+        max-width: 500px;
+        margin: 0 auto;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
-        column-gap: 10px;
+        gap: 1rem;
+        padding: 1rem;
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--border-radius);
+        backdrop-filter: blur(10px);
       }
 
-      .words{
+      .words {
         width: 100%;
-        height: 20%;
+        height: 50px;
         display: block;
-        text-align: center;
+        text-align: left;
         font-size: 1rem;
-        padding: 10px;
-        border: 1px solid #ccc;
-        border-radius: 20px;
-        margin-top: 20px;
-        /* background-color:blanchedalmond ; */
+        padding: 0.75rem;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--border-radius);
+        background: var(--glass-bg);
+        color: var(--text-color);
+        transition: var(--transition);
+      }
+
+      .words:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1);
+      }
+
+      .words::placeholder {
+        color: rgba(255, 255, 255, 0.5);
       }
 
       .icons_div {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        padding: 0.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .icon {
+        width: 45px;
+        height: 45px;
+        font-size: 1.2rem;
+      }
+
+      #modifiedText {
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+        color: var(--text-color);
+        opacity: 0.8;
+      }
+
+      .camera-preview {
+        display: none;
+        position: relative;
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      #previewVideo {
+        width: 100%;
         height: 100%;
-        /* background-color: lightskyblue; */
+        object-fit: contain;
+        display: block;
+      }
+
+      .camera-controls {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+      }
+
+      .control-btn {
+        width: 45px;
+        height: 45px;
+        font-size: 1.2rem;
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--border-radius);
+        backdrop-filter: blur(10px);
       }
     </style>
   </head>
   <body>
-    <header>
-      <!-- <img src="static/images/Title-removebg-preview.png" alt="" /> -->
-    </header>
     <div class="main_container">
       <div id="animation_container">
         <img id="avatarImage" src="static/images/avatar.png" alt="Avatar" />
@@ -69,92 +137,186 @@
         </video>
       </div>
 
-      <!--  -->
-
       <div class="output-container">
-        <div contenteditable style="height: 100%; width: 100%; padding: 10px;">
-          <p id="p">Speak</p>
-           <!-- <input type="text" placeholder="Speak your mind" class="words" > -->
-          <input type="text" placeholder="Speak your mind" class="words" id="textInput">
-        </div>
-
-        <!-- <input type="text" placeholder="Speak your mind" class="words" id="textInput"> -->
-
+        <div class="words" id="textInput" contenteditable="true" placeholder="Speak your mind...">Speak your mind...</div>
         <div class="icons_div">
-          <img id="recordButton" src="static/images/3.png" alt="" class="icon"/>
-          <img id="vdoRecBtn" src="static/images/2.png" alt="" class="icon" />
+          <div class="icon" id="micButton">
+            <i class="fas fa-microphone"></i>
+          </div>
+          <div class="icon" id="cameraButton">
+            <i class="fas fa-camera"></i>
+          </div>
         </div>
-
-        <p id="modifiedText"></p>
+        <div id="cameraPreview" class="camera-preview">
+          <video id="previewVideo" autoplay playsinline></video>
+          <canvas id="detectionCanvas" class="detection-canvas"></canvas>
+          <div class="camera-controls">
+            <div class="detection-status">No hand detected</div>
+          </div>
+        </div>
+        <div id="modifiedText"></div>
       </div>
     </div>
 
-    
     <script>
       let isRecording = false;
       let isRunning = false;
       let transcribedText = "";
       let finalWordsDict = {};
 
-      //new
       let mediaRecorder;
       let audioChunks = [];
       let stream;
 
-      // window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      // const recognition = new SpeechRecognition();
-      // recognition.interimResults = true;
-      // recognition.continuous = true;
-
       const words = document.querySelector(".words");
-      const recordButton = document.getElementById("recordButton");
-      const vdoRecBtn = document.getElementById("vdoRecBtn");
-      const p = document.getElementById("p");
+      const micButton = document.getElementById("micButton");
+      const cameraButton = document.getElementById("cameraButton");
       const modifiedText = document.getElementById("modifiedText");
       const wordAnimation = document.getElementById("wordAnimation");
       const animationSource = document.getElementById("animationSource");
       const avatarImage = document.getElementById("avatarImage");
       const textInput = document.getElementById("textInput");
 
+      // Camera and Hand Detection functionality
+      let cameraStream = null;
+      let detectionCanvas = document.getElementById('detectionCanvas');
+      let ctx = detectionCanvas.getContext('2d');
+      let detectionStatus = document.querySelector('.detection-status');
 
-    recordButton.addEventListener("click", async () => {
-  console.log("🎙️ Record button clicked");
+      micButton.addEventListener("click", async () => {
+        console.log("🎙️ Mic button clicked");
 
-  if (isRecording) {
-    recordButton.src = "static/images/3.png";
-    recordButton.textContent = "Start Recording";
-    // recognition.stop();
-    await stopRecording();
-    isRecording = false;
-  } else {
-    recordButton.src = "static/images/stop.png"; 
-    recordButton.textContent = "Stop Recording";
-    // recognition.start();
-    await startRecording();
-    isRecording = true;
-  }
-});
-// recognition.addEventListener("result", (event) => {
-//   // Collect the transcript so far, including interim results
-//   console.log("Inside recognition");
-//   let interimTranscript = "";
-//   let finalTranscript = "";
+        if (isRecording) {
+          micButton.querySelector('i').classList.remove('fa-stop');
+          micButton.querySelector('i').classList.add('fa-microphone');
+          micButton.style.background = '';
+          await stopRecording();
+          isRecording = false;
+        } else {
+          micButton.querySelector('i').classList.remove('fa-microphone');
+          micButton.querySelector('i').classList.add('fa-stop');
+          micButton.style.background = '#ff4444';
+          await startRecording();
+          isRecording = true;
+        }
+      });
 
-//   for (let i = event.resultIndex; i < event.results.length; i++) {
-//     if (event.results[i].isFinal) {
-//       finalTranscript += event.results[i][0].transcript;
-//     } else {
-//       interimTranscript += event.results[i][0].transcript;
-//     }
-//   }
-//   // Show interim results live
-//   textInput.value = finalTranscript + interimTranscript;
-// });
-// recognition.addEventListener("end", () => {
-//   if (isRecording) {
-//     recognition.start(); // keep recognition alive while recording
-//   }
-// });
+      async function startCamera() {
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user"
+            } 
+          });
+          previewVideo.srcObject = cameraStream;
+          cameraPreview.style.display = 'block';
+          
+          // Set canvas size to match video
+          previewVideo.onloadedmetadata = () => {
+            detectionCanvas.width = previewVideo.videoWidth;
+            detectionCanvas.height = previewVideo.videoHeight;
+          };
+          
+          // Start hand detection
+          console.log("Starting hand detection");
+          cameraButton.querySelector('i').classList.remove('fa-camera');
+          cameraButton.querySelector('i').classList.add('fa-stop');
+          cameraButton.style.background = '#ff4444';
+          const response = await fetch('/start', { method: 'POST' });
+          const result = await response.json();
+          console.log(result.status);
+          isRunning = true;
+          
+          // Start processing frames
+          processVideoFrame();
+        } catch (err) {
+          console.error('Error accessing camera:', err);
+          alert('Could not access camera. Please ensure you have granted camera permissions.');
+        }
+      }
+
+      async function stopCamera() {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          previewVideo.srcObject = null;
+          cameraPreview.style.display = 'none';
+          
+          // Stop hand detection
+          console.log("Stopping hand detection");
+          cameraButton.querySelector('i').classList.remove('fa-stop');
+          cameraButton.querySelector('i').classList.add('fa-camera');
+          cameraButton.style.background = '';
+          const response = await fetch('/stop', { method: 'POST' });
+          const result = await response.json();
+          console.log(result.status);
+          isRunning = false;
+          
+          // Clear canvas
+          ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+        }
+      }
+
+      async function processVideoFrame() {
+        if (!isRunning) return;
+        
+        try {
+          // Draw the video frame to the canvas
+          ctx.drawImage(previewVideo, 0, 0, detectionCanvas.width, detectionCanvas.height);
+          
+          // Get the frame data for processing
+          const imageData = ctx.getImageData(0, 0, detectionCanvas.width, detectionCanvas.height);
+          
+          // Send frame to server for processing
+          const response = await fetch('/process-frame', {
+            method: 'POST',
+            body: JSON.stringify({
+              width: detectionCanvas.width,
+              height: detectionCanvas.height,
+              data: Array.from(imageData.data)
+            }),
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          const result = await response.json();
+          
+          // Update detection status
+          if (result.detected) {
+            detectionStatus.textContent = `Detected: ${result.label}`;
+            detectionStatus.style.color = '#00ff00';
+            
+            // Draw detection box
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+              result.bbox.x,
+              result.bbox.y,
+              result.bbox.width,
+              result.bbox.height
+            );
+          } else {
+            detectionStatus.textContent = 'No hand detected';
+            detectionStatus.style.color = '#ffffff';
+          }
+          
+          // Continue processing frames
+          requestAnimationFrame(processVideoFrame);
+        } catch (err) {
+          console.error('Error processing frame:', err);
+          requestAnimationFrame(processVideoFrame);
+        }
+      }
+
+      cameraButton.addEventListener('click', () => {
+        if (!isRunning) {
+          startCamera();
+        } else {
+          stopCamera();
+        }
+      });
 
       async function startRecording() {
         try {
@@ -172,10 +334,8 @@
             console.log("🛑 Recording stopped...");
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
 
-            //new
             const audioURL = URL.createObjectURL(audioBlob);
             const audio = new Audio(audioURL);
-            //audio.play(); // 🔊 This will play back your voice!
 
             const formData = new FormData();
             formData.append('audio', audioBlob, 'speech.webm');
@@ -189,10 +349,12 @@
               const text = result.transcript;
               console.log("Transcript:", text);
 
-              p.innerHTML = text;
-              processText(text); // Use same processText function to trigger ISL conversion
+              // Update the text input with the transcribed text
+              textInput.textContent = text;
+              processText(text);
             } catch (error) {
               console.error("Error processing speech:", error);
+              textInput.textContent = "Error processing speech. Please try again.";
             }
           };
 
@@ -200,6 +362,7 @@
           console.log("Recording started...");
         } catch (error) {
           console.error("Error starting recording:", error);
+          textInput.textContent = "Error accessing microphone. Please check permissions.";
         }
       }
 
@@ -209,7 +372,6 @@
             console.log("Stopping mediaRecorder...");
             mediaRecorder.stop();
             
-            // Give time for onstop event to execute
             setTimeout(() => {
               if (stream) {
                 console.log("Stopping all audio tracks...");
@@ -228,92 +390,16 @@
             resolve();
           }
         });
-      
-        // if (mediaRecorder && mediaRecorder.state === "recording") {
-        //   stream.getTracks().forEach(track => track.stop());
-        //   stream = null;
-        //   mediaRecorder.stop();
-        // }
-        // mediaRecorder.stop();
-        // console.log("Recording stopped.");
       }
-      
-      vdoRecBtn.addEventListener('click', async () => {
-        try{
-          if (isRunning) {
-            console.log("Stopping the video recording");
-            // isRunning = false;
-            // vdoRecBtn.src = "static/images/2.png";
-            // await stopRecording();
-            const response = await fetch('/stop', { method: 'POST' });
-            const result = await response.json();
-            console.log(result.status);
-          } 
-          else {
-            console.log("Starting the video recording");
-            // isRunning = true;
-            // vdoRecBtn.src = "static/images/4.png";
-            // await startRecording();
-            const response = await fetch('/start', { method: 'POST' });
-            const result = await response.json();
-            console.log(result.status);
-          }
-          isRunning = !isRunning;
-        } 
-        catch (error) {
-          console.error('Error:', error);
-        }
-      });
-
-
-      // recognition.addEventListener("result", (e) => {
-      //   const transcript = Array.from(e.results)
-      //     .map((result) => result[0])
-      //     .map((result) => result.transcript)
-      //     .join("");
-
-      //   p.innerHTML = transcript;
-      //   transcribedText = transcript;
-      //   console.log(transcribedText);
-      // });
-
-      // recordButton.addEventListener("click", () => {
-      //   console.log("btn clicked!!");
-      //   if (isRecording) {
-      //     recognition.stop();
-      //     recordButton.textContent = "Start Recording";
-      //     processText(transcribedText);
-      //     // Clear previous data
-      //     //p.innerHTML = "";
-      //     transcribedText = "";
-      //     finalWordsDict = {}; // Reset the object
-      //     wordAnimation.pause(); // Stop the previous animation
-      //     animationSource.src = ""; // Clear the previous video source
-      //     wordAnimation.style.display = "none"; // Hide the video
-      //     avatarImage.style.display = "block"; // Show the avatar
-      //     wordAnimation.load(); // Reload the video element to apply the clear source
-      //     modifiedText.innerText = ""; // Clear the previous ISL text
-      //   } else {
-      //     recognition.start();
-      //     recordButton.textContent = "Stop Recording";
-      //   }
-      //   isRecording = !isRecording;
-      // });
-
-      // recognition.addEventListener("end", () => {
-      //   if (isRecording) {
-      //     recognition.start();
-      //   }
-      // });
 
       textInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          const text = textInput.value.trim();
-          console.log(text);
+          const text = textInput.textContent.trim();
+          console.log("Text to process:", text);
           if (text) {
             processText(text);
-            textInput.value = ""; // Clear the input box
+            textInput.textContent = ""; // Clear the input box
           }
         }
       });
@@ -324,7 +410,7 @@
           finalWordsDict = {};
           transcribedText = "";
 
-          console.log("Sending data");
+          console.log("Sending data:", text);
           const response = await fetch("/", {
             method: "POST",
             headers: {
@@ -343,15 +429,14 @@
           }
 
           finalWordsDict = result.modified_text;
-          modifiedText.innerText = `ISL: ${Object.values(finalWordsDict).join(
-            " "
-          )}`;
-          console.log(finalWordsDict);
+          modifiedText.textContent = `ISL: ${Object.values(finalWordsDict).join(" ")}`;
+          console.log("Modified text:", finalWordsDict);
 
           // Start playing the animation for the words
           playAnimations(Object.values(finalWordsDict));
         } catch (error) {
-          modifiedText.innerText = `Error: ${error.message}`;
+          console.error("Error processing text:", error);
+          modifiedText.textContent = `Error: ${error.message}`;
         }
       }
 

@@ -34,7 +34,7 @@ from google.cloud import speech
 from google.cloud import translate_v2 as translate
 
 # Set your GCP credentials path
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\anjuk\Desktop\BE_PROJECT\SIH_SIGNSYNC_1715\cogent-case-460012-s9-9ea78606f876.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(os.path.dirname(__file__), "cogent-case-460012-s9-9ea78606f876.json")
 
 # Init Google APIs
 speech_client = speech.SpeechClient()
@@ -232,96 +232,275 @@ def modify_tree_structure(parent_tree):
 
 
 def reorder_eng_to_isl(input_string):
-    # For ISL, we generally want subject-object-verb pattern
-    # Try to parse with CoreNLP first
-    # parser = CoreNLPParser(url='http://localhost:9000')  # Ensure CoreNLP server is running
-
-    # NEW: Special handling for greetings and simple phrases
-    simple_phrases = ["hello", "hi", "bye", "yes", "no", "ok", "okay", "thank you", "thanks", "good"]
-    words = input_string.split()
-    if not words:
-        return words
-    
-    # NEW: Check if this is just a greeting or simple phrase
-    # List of common greetings or introductory phrases
+    """
+    Enhanced ISL grammar reordering function that handles:
+    - Basic SOV structure
+    - Questions (WH-questions and Yes/No questions)
+    - Complex sentences with conjunctions
+    - Time expressions
+    - Negations
+    - Modifiers and adjectives
+    """
+    # Special handling for greetings and simple phrases
     greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", 
                 "goodbye", "bye", "welcome", "greetings", "namaste"]
     
-    # Check if the sentence starts with a greeting
-    first_word_lower = words[0].lower()
+    words = input_string.split()
+    if not words:
+        return words
+
+    # Handle greetings
     greeting_words = []
     remaining_words = words.copy()
     
     # Identify greeting word(s) at the beginning
+    first_word_lower = words[0].lower()
     if first_word_lower in greetings:
         greeting_words = [words[0]]
         remaining_words = words[1:]
     elif len(words) >= 2 and " ".join(words[:2]).lower() in greetings:
         greeting_words = words[:2]
         remaining_words = words[2:]
-    
-    # If there are remaining words, apply subject-object-verb pattern
-    if remaining_words:
-        try:
-            parser = CoreNLPParser(url='http://localhost:9000')
-            # parse_tree = next(parser.raw_parse(input_string))
-            parse_tree = next(parser.raw_parse(" ".join(remaining_words)))
-            if parse_tree is None:
-                print("Parse tree is None.")
-                # return input_string.split()  # Return words as they are if parsing fails
-                return greeting_words + apply_simple_sov(remaining_words)
-            
-            parent_tree = ParentedTree.convert(parse_tree)
-            modified_parse_tree = modify_tree_structure(parent_tree)
-            parsed_sent = modified_parse_tree.leaves()
-            # return parsed_sent
-            return greeting_words + parsed_sent
-        
-        except Exception as e:
-            print(f"Error parsing input string: {str(e)}")
-            # If parsing fails, just return the original words
-            # return input_string.split()
-            return greeting_words + apply_simple_sov(remaining_words)
-    else:
+
+    if not remaining_words:
         return greeting_words
 
-#New funciton
-def apply_simple_sov(words):
-    """Apply a simple Subject-Object-Verb reordering for ISL."""
-    # Remove auxiliary verbs which aren't needed in ISL
+    try:
+        # Parse the sentence
+        parser = CoreNLPParser(url='http://localhost:9000')
+        parse_tree = next(parser.raw_parse(" ".join(remaining_words)))
+        if parse_tree is None:
+            return greeting_words + apply_enhanced_sov(remaining_words)
+        
+        parent_tree = ParentedTree.convert(parse_tree)
+        
+        # Handle different sentence types
+        if is_question(remaining_words):
+            return greeting_words + handle_question(remaining_words, parent_tree)
+        elif is_negative(remaining_words):
+            return greeting_words + handle_negative(remaining_words, parent_tree)
+        elif is_complex_sentence(remaining_words):
+            return greeting_words + handle_complex_sentence(remaining_words, parent_tree)
+        else:
+            modified_parse_tree = modify_tree_structure(parent_tree)
+            parsed_sent = modified_parse_tree.leaves()
+            return greeting_words + parsed_sent
+
+    except Exception as e:
+        print(f"Error parsing input string: {str(e)}")
+        return greeting_words + apply_enhanced_sov(remaining_words)
+
+def is_question(words):
+    """Check if the sentence is a question."""
+    question_words = ["what", "who", "where", "when", "why", "how", "which", "whose"]
+    return (words[0].lower() in question_words or 
+            words[-1].endswith('?') or 
+            any(word.lower() in ["is", "are", "do", "does", "did", "can", "could", "will", "would"] for word in words[:2]))
+
+def is_negative(words):
+    """Check if the sentence contains negation."""
+    negations = ["not", "no", "never", "neither", "nor", "none", "nothing", "nowhere"]
+    return any(word.lower() in negations for word in words)
+
+def is_complex_sentence(words):
+    """Check if the sentence is complex (contains conjunctions, relative clauses, or conditionals)."""
+    conjunctions = ["and", "or", "but", "because", "although", "while", "since", "unless", "if"]
+    relative_pronouns = ["who", "whom", "whose", "which", "that"]
+    conditional_words = ["if", "unless", "provided", "assuming", "supposing"]
+    
+    return any(word.lower() in conjunctions + relative_pronouns + conditional_words for word in words)
+
+def handle_question(words, parse_tree):
+    """Handle different types of questions in ISL."""
+    # WH-questions
+    wh_words = ["what", "who", "where", "when", "why", "how", "which", "whose"]
+    if words[0].lower() in wh_words:
+        # Move WH-word to the end
+        return words[1:] + [words[0]]
+    
+    # Yes/No questions
+    if words[0].lower() in ["is", "are", "do", "does", "did", "can", "could", "will", "would"]:
+        # Move auxiliary verb to the end
+        return words[1:] + [words[0]]
+    
+    # Questions ending with '?'
+    if words[-1].endswith('?'):
+        words[-1] = words[-1].rstrip('?')
+        return words
+
+def handle_negative(words, parse_tree):
+    """Handle negative sentences in ISL."""
+    negations = ["not", "no", "never", "neither", "nor", "none", "nothing", "nowhere"]
+    neg_word = next(word for word in words if word.lower() in negations)
+    neg_index = words.index(neg_word)
+    
+    # Move negation to the end
+    return words[:neg_index] + words[neg_index+1:] + [neg_word]
+
+def handle_complex_sentence(words, parse_tree):
+    """Enhanced handling of complex sentences with various structures."""
+    # Check for relative clauses
+    if has_relative_clause(words):
+        return handle_relative_clause(words, parse_tree)
+    
+    # Check for conditional sentences
+    if has_conditional(words):
+        return handle_conditional(words, parse_tree)
+    
+    # Check for passive voice
+    if is_passive_voice(words):
+        return handle_passive_voice(words, parse_tree)
+    
+    # Handle regular complex sentences with conjunctions
+    conjunctions = ["and", "or", "but", "because", "although", "while", "since", "unless", "if"]
+    conj_word = next((word for word in words if word.lower() in conjunctions), None)
+    
+    if conj_word:
+        conj_index = words.index(conj_word)
+        first_part = words[:conj_index]
+        second_part = words[conj_index+1:]
+        
+        # Process each part separately
+        first_processed = apply_enhanced_sov(first_part)
+        second_processed = apply_enhanced_sov(second_part)
+        
+        # Combine with conjunction at the end
+        return first_processed + second_processed + [conj_word]
+    
+    return apply_enhanced_sov(words)
+
+def has_relative_clause(words):
+    """Check if the sentence contains a relative clause."""
+    relative_pronouns = ["who", "whom", "whose", "which", "that"]
+    return any(word.lower() in relative_pronouns for word in words)
+
+def handle_relative_clause(words, parse_tree):
+    """Handle sentences with relative clauses."""
+    relative_pronouns = ["who", "whom", "whose", "which", "that"]
+    
+    # Find the relative pronoun
+    rel_pronoun = next(word for word in words if word.lower() in relative_pronouns)
+    rel_index = words.index(rel_pronoun)
+    
+    # Split into main clause and relative clause
+    main_clause = words[:rel_index]
+    relative_clause = words[rel_index+1:]
+    
+    # Process each part
+    main_processed = apply_enhanced_sov(main_clause)
+    relative_processed = apply_enhanced_sov(relative_clause)
+    
+    # In ISL, relative clauses often come after the main clause
+    return main_processed + [rel_pronoun] + relative_processed
+
+def has_conditional(words):
+    """Check if the sentence is conditional."""
+    conditional_words = ["if", "unless", "provided", "assuming", "supposing"]
+    return any(word.lower() in conditional_words for word in words)
+
+def handle_conditional(words, parse_tree):
+    """Handle conditional sentences."""
+    conditional_words = ["if", "unless", "provided", "assuming", "supposing"]
+    
+    # Find the conditional word
+    cond_word = next(word for word in words if word.lower() in conditional_words)
+    cond_index = words.index(cond_word)
+    
+    # Split into condition and result
+    condition = words[cond_index+1:]
+    result = words[:cond_index]
+    
+    # Process each part
+    condition_processed = apply_enhanced_sov(condition)
+    result_processed = apply_enhanced_sov(result)
+    
+    # In ISL, condition often comes after the result
+    return result_processed + [cond_word] + condition_processed
+
+def is_passive_voice(words):
+    """Check if the sentence is in passive voice."""
+    passive_indicators = ["is", "are", "was", "were", "be", "been", "being"]
+    return any(word.lower() in passive_indicators for word in words)
+
+def handle_passive_voice(words, parse_tree):
+    """Handle passive voice sentences."""
+    passive_indicators = ["is", "are", "was", "were", "be", "been", "being"]
+    
+    # Find the passive indicator
+    passive_word = next(word for word in words if word.lower() in passive_indicators)
+    passive_index = words.index(passive_word)
+    
+    # Split into subject and predicate
+    subject = words[:passive_index]
+    predicate = words[passive_index+1:]
+    
+    # Process each part
+    subject_processed = apply_enhanced_sov(subject)
+    predicate_processed = apply_enhanced_sov(predicate)
+    
+    # In ISL, passive voice often follows a different structure
+    return subject_processed + predicate_processed + [passive_word]
+
+def apply_enhanced_sov(words):
+    """Enhanced SOV ordering with better handling of modifiers, time expressions, and adverbial phrases."""
+    if not words:
+        return words
+    
+    # Remove auxiliary verbs
     aux_verbs = ["is", "are", "am", "was", "were", "do", "does", "did", 
                 "has", "have", "had", "will", "shall", "should", "would", 
                 "can", "could", "may", "might", "must"]
     
     filtered_words = [w for w in words if w.lower() not in aux_verbs]
     
-    if not filtered_words:
-        return words
+    # Handle time expressions
+    time_words = ["today", "tomorrow", "yesterday", "now", "then", "before", "after"]
+    time_expressions = []
     
-    # For questions (ending with '?')
-    if words[-1].endswith('?') or words[0].lower() in ["what", "who", "where", "when", "why", "how"]:
-        # For questions like "What is your name?" -> "your name what"
-        question_words = ["what", "who", "where", "when", "why", "how"]
+    # Handle adverbial phrases
+    adverbs = ["quickly", "slowly", "carefully", "well", "badly", "easily", "hard"]
+    adverbial_phrases = []
+    
+    # Handle prepositional phrases
+    prepositions = ["in", "on", "at", "by", "with", "to", "from", "of", "for"]
+    prepositional_phrases = []
+    
+    # Handle comparative and superlative structures
+    comparatives = ["more", "less", "better", "worse", "bigger", "smaller"]
+    superlatives = ["most", "least", "best", "worst", "biggest", "smallest"]
+    
+    remaining_words = []
+    
+    for word in filtered_words:
+        if word.lower() in time_words:
+            time_expressions.append(word)
+        elif word.lower() in adverbs:
+            adverbial_phrases.append(word)
+        elif word.lower() in prepositions:
+            prepositional_phrases.append(word)
+        elif word.lower() in comparatives + superlatives:
+            remaining_words.append(word)
+        else:
+            remaining_words.append(word)
+    
+    # Basic SOV ordering for remaining words
+    if len(remaining_words) >= 3:
+        subject = remaining_words[:1]
+        verb = remaining_words[-1:]
+        object_words = remaining_words[1:-1]
         
-        # Remove question mark for processing
-        if filtered_words[-1].endswith('?'):
-            filtered_words[-1] = filtered_words[-1][:-1]
-        # Check if first word is a question word
-        if filtered_words and filtered_words[0].lower() in question_words:
-            question_word = filtered_words[0]
-            remainder = filtered_words[1:]
-            return remainder + [question_word]
-    # For simple declarative sentences, try basic SOV ordering
-    # This is very simplified and might not work for complex sentences
-    if len(filtered_words) >= 3:
-        # Identify potential subject, object, verb
-        subject = filtered_words[:1]  # First word as subject
-        verb = filtered_words[-1:]    # Last word as verb
-        object_words = filtered_words[1:-1]  # Everything in between as object
-        return subject + object_words + verb
+        # Combine all elements in ISL order
+        return (time_expressions + 
+                subject + 
+                object_words + 
+                verb + 
+                adverbial_phrases + 
+                prepositional_phrases)
     
-    # If we can't properly reorder, return as is
-    return filtered_words
+    return (time_expressions + 
+            remaining_words + 
+            adverbial_phrases + 
+            prepositional_phrases)
 
 def pre_process(text):
     remove_punct(word_list)
@@ -501,64 +680,130 @@ labels = ["Bye", "Good", "Hello", "No", "Okay", "ThankYou", "Yes"]
 
 def run_hand_detection():
     global cap, is_running
-    cap = cv2.VideoCapture(0)
-    while is_running:
-        success, img = cap.read()
-        imgOutput = img.copy()
-        hands, img = detector.findHands(img)
-        if hands:
-            hand = hands[0]
-            x, y, w, h = hand['bbox']
-            imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
-            imgCrop = img[y - offset:y + h + offset, x - offset:x + w + offset]
-            aspectRatio = h / w
+    try:
+        # Try to open the camera
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("Error: Could not open camera")
+            return
 
-            if aspectRatio > 1:
-                k = imgSize / h
-                wCal = math.ceil(k * w)
-                imgResize = cv2.resize(imgCrop, (wCal, imgSize))
-                wGap = math.ceil((imgSize - wCal) / 2)
-                imgWhite[:, wGap: wCal + wGap] = imgResize
-                prediction, index = classifier.getPrediction(imgWhite, draw=False)
-                print(prediction, index)
-            else:
-                k = imgSize / w
-                hCal = math.ceil(k * h)
-                imgResize = cv2.resize(imgCrop, (imgSize, hCal))
-                hGap = math.ceil((imgSize - hCal) / 2)
-                imgWhite[hGap: hCal + hGap, :] = imgResize
-                prediction, index = classifier.getPrediction(imgWhite, draw=False)
-            
-            cv2.rectangle(imgOutput, (x - offset, y - offset - 70), 
-                          (x - offset + 400, y - offset + 60 - 50), 
-                          (0, 255, 0), cv2.FILLED)
-            cv2.putText(imgOutput, labels[index], (x, y - 30), 
-                        cv2.FONT_HERSHEY_COMPLEX, 2, (0, 0, 0), 2)
-            cv2.rectangle(imgOutput, (x - offset, y - offset), 
-                          (x + w + offset, y + h + offset), (0, 255, 0), 4)
+        # Set camera properties for better performance
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
-        cv2.imshow('Image', imgOutput)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # Initialize frame counter and timestamp
+        frame_count = 0
+        last_timestamp = 0
 
-    cap.release()
-    cv2.destroyAllWindows()
+        while is_running:
+            success, img = cap.read()
+            if not success:
+                print("Error: Could not read frame from camera")
+                break
+
+            try:
+                # Increment frame counter
+                frame_count += 1
+                current_timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
+                
+                # Skip frames if processing is too slow
+                if current_timestamp - last_timestamp < 33:  # ~30 FPS
+                    continue
+                
+                last_timestamp = current_timestamp
+                
+                imgOutput = img.copy()
+                hands, img = detector.findHands(img, draw=False)  # Disable drawing to improve performance
+                
+                if hands:
+                    hand = hands[0]
+                    x, y, w, h = hand['bbox']
+                    
+                    # Ensure crop coordinates are within bounds
+                    x1 = max(0, x - offset)
+                    y1 = max(0, y - offset)
+                    x2 = min(img.shape[1], x + w + offset)
+                    y2 = min(img.shape[0], y + h + offset)
+                    
+                    imgCrop = img[y1:y2, x1:x2]
+                    
+                    if imgCrop.size > 0:
+                        aspectRatio = h / w
+                        imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
+
+                        if aspectRatio > 1:
+                            k = imgSize / h
+                            wCal = math.ceil(k * w)
+                            imgResize = cv2.resize(imgCrop, (wCal, imgSize))
+                            wGap = math.ceil((imgSize - wCal) / 2)
+                            imgWhite[:, wGap:wCal + wGap] = imgResize
+                        else:
+                            k = imgSize / w
+                            hCal = math.ceil(k * h)
+                            imgResize = cv2.resize(imgCrop, (imgSize, hCal))
+                            hGap = math.ceil((imgSize - hCal) / 2)
+                            imgWhite[hGap:hCal + hGap, :] = imgResize
+                        
+                        try:
+                            prediction, index = classifier.getPrediction(imgWhite, draw=False)
+                            
+                            # Draw results on output image
+                            cv2.rectangle(imgOutput, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            cv2.putText(imgOutput, labels[index], (x1, y1 - 10),
+                                      cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
+                        except Exception as e:
+                            print(f"Error in classification: {str(e)}")
+                            continue
+                
+                try:
+                    cv2.imshow('Image', imgOutput)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                except cv2.error as e:
+                    print(f"Display error: {str(e)}")
+                    continue
+
+            except Exception as e:
+                print(f"Error processing frame: {str(e)}")
+                continue
+
+    except Exception as e:
+        print(f"Error in hand detection: {str(e)}")
+    finally:
+        if cap is not None:
+            cap.release()
+        try:
+            cv2.destroyAllWindows()
+        except:
+            pass
 
 @app.route('/start', methods=['POST'])
 def start_script():
     global is_running, thread
     if not is_running:
-        is_running = True
-        thread = threading.Thread(target=run_hand_detection)
-        thread.start()
-        return jsonify({"status": "Started"})
+        try:
+            is_running = True
+            thread = threading.Thread(target=run_hand_detection)
+            thread.daemon = True  # Make thread daemon so it exits when main program exits
+            thread.start()
+            return jsonify({"status": "Started"})
+        except Exception as e:
+            is_running = False
+            return jsonify({"status": "Error", "message": str(e)}), 500
     return jsonify({"status": "Already running"})
 
 @app.route('/stop', methods=['POST'])
 def stop_script():
-    global is_running
+    global is_running, cap
     if is_running:
         is_running = False
+        if cap is not None:
+            cap.release()
+        try:
+            cv2.destroyAllWindows()
+        except:
+            pass
         return jsonify({"status": "Stopped"})
     return jsonify({"status": "Not running"})
 
@@ -594,6 +839,74 @@ def speech_to_text():
     print("Translated:", translated_text)
 
     return jsonify({"transcript": translated_text})
+
+@app.route('/process-frame', methods=['POST'])
+def process_frame():
+    try:
+        data = request.get_json()
+        width = data['width']
+        height = data['height']
+        frame_data = np.array(data['data'], dtype=np.uint8).reshape((height, width, 4))
+        
+        # Convert RGBA to BGR for OpenCV
+        frame = cv2.cvtColor(frame_data, cv2.COLOR_RGBA2BGR)
+        
+        # Process frame with hand detector
+        hands, frame = detector.findHands(frame, draw=False)  # Disable drawing to improve performance
+        
+        if hands:
+            hand = hands[0]
+            x, y, w, h = hand['bbox']
+            
+            # Ensure crop coordinates are within bounds
+            x1 = max(0, x - offset)
+            y1 = max(0, y - offset)
+            x2 = min(frame.shape[1], x + w + offset)
+            y2 = min(frame.shape[0], y + h + offset)
+            
+            imgCrop = frame[y1:y2, x1:x2]
+            
+            if imgCrop.size > 0:
+                aspectRatio = h / w
+                imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
+                
+                if aspectRatio > 1:
+                    k = imgSize / h
+                    wCal = math.ceil(k * w)
+                    imgResize = cv2.resize(imgCrop, (wCal, imgSize))
+                    wGap = math.ceil((imgSize - wCal) / 2)
+                    imgWhite[:, wGap:wCal + wGap] = imgResize
+                else:
+                    k = imgSize / w
+                    hCal = math.ceil(k * h)
+                    imgResize = cv2.resize(imgCrop, (imgSize, hCal))
+                    hGap = math.ceil((imgSize - hCal) / 2)
+                    imgWhite[hGap:hCal + hGap, :] = imgResize
+                
+                try:
+                    prediction, index = classifier.getPrediction(imgWhite, draw=False)
+                    return jsonify({
+                        'detected': True,
+                        'label': labels[index],
+                        'bbox': {
+                            'x': x1,
+                            'y': y1,
+                            'width': x2 - x1,
+                            'height': y2 - y1
+                        }
+                    })
+                except Exception as e:
+                    print(f"Error in classification: {str(e)}")
+                    return jsonify({'detected': False, 'error': str(e)})
+        
+        return jsonify({'detected': False})
+        
+    except Exception as e:
+        print(f"Error processing frame: {str(e)}")
+        return jsonify({
+            'detected': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

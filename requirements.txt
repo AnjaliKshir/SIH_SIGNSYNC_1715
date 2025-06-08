@@ -1,4 +1,4 @@
-Flask
+Flask[async]
 nltk
 stanza
 spacy
